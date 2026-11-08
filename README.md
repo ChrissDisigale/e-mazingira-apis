@@ -18,37 +18,6 @@ The API does not generate demo values or missing historical observations. An emp
 | Response content type | `application/json` |
 | Analytics output unit | `tCO2e` |
 
-From the Next.js application, build the analytics URL as follows:
-
-```ts
-const GHG_ANALYTICS_BASE_URL =
-  `${process.env.NEXT_PUBLIC_API_BASE_URL_80}` +
-  "/climate-change/api/v1/ghg-emissions/analytics";
-```
-
-For a direct authenticated request:
-
-```ts
-const response = await fetch(
-  `${process.env.NEXT_PUBLIC_API_BASE_URL_80}/climate-change/api/v1/ghg-emissions/analytics/summary`,
-  {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-  },
-);
-
-if (!response.ok) {
-  throw new Error(`Request failed: ${response.status}`);
-}
-
-const result = await response.json();
-```
-
-Do not expose a JWT in client source code. The existing IEMIS frontend normally calls the shared server-side `apiFetch` helper, which reads the HTTP-only `token` cookie, attaches the bearer token, and handles token refresh.
-
 ## Required headers
 
 ```http
