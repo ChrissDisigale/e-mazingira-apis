@@ -1,492 +1,524 @@
-# GHG Emissions Analytics API
+# Climate Change Mitigation Measures API
 
-## Purpose
+> **IEMIS · Backend API and frontend integration guide**  
+> Covers mitigation measure configuration, dynamic forms, record CRUD, validation, and deployment.
 
-The GHG Emissions Analytics API supplies the three GHG dashboard KPI cards and all 27 dashboard charts from saved GHG Inventory records. The API performs aggregation in PostgreSQL and returns chart-ready category, trend, gas-by-sector, and regional heatmap datasets.
 
-The API does not generate demo values or missing historical observations. An empty array means no eligible saved records matched the supplied filters.
 
-## Connection details
+---
 
-| Item | Value |
-|---|---|
-| HTTP method | `GET` for every analytics operation |
-| Service endpoint prefix | `/api/v1/ghg-emissions/analytics` |
-| Gateway endpoint prefix | `/climate-change/api/v1/ghg-emissions/analytics` |
-| Frontend gateway environment variable | `NEXT_PUBLIC_API_BASE_URL_80` |
-| Authentication | JWT bearer token |
-| Response content type | `application/json` |
-| Analytics output unit | `tCO2e` |
+## Overview
 
-## Required headers
+The IEMIS Mitigation Measures module uses database master data and JSONB field schemas:
 
-```http
-Authorization: Bearer <access-token>
-Accept: application/json
-Content-Type: application/json
+```text
+MITIGATION_MEASURE → Sector → Sector Measure → Action Code → Dynamic Schema → Record
 ```
 
-## Standard response wrapper
+It supports Energy, Transport, Forest/Forestry, Waste, Industry (currently named `Mining Industry` in IEMIS master data), and Livestock. Records retain their action code, Sector Measure relationship, organization scope, Council, Region, approval state, and code-specific JSONB values.
 
-Every successful endpoint uses the existing IEMIS `ApiResponse<T>` wrapper:
+New and updated mitigation records require `coverage`. Historical records without it remain readable.
+
+## Base URLs and authentication
+
+Frontend base: `${NEXT_PUBLIC_API_BASE_URL_80}` (gateway origin, without appending the service path twice).
+
+The gateway prefixes climate endpoints with `/climate-change` and environmental master-data endpoints with `/env`. The controller-relative paths omit those two gateway service prefixes.
+
+All endpoints use the existing JWT resource-server security and global permission aspect.
+
+```http
+Authorization: Bearer <ACCESS_TOKEN>
+Content-Type: application/json
+Accept: application/json
+```
+
+Standard response:
 
 ```json
 {
   "success": true,
-  "message": "GHG dashboard summary retrieved",
+  "message": "Data saved successfully",
   "data": {}
 }
 ```
 
-Errors use the same wrapper:
+## Dropdown dependency flow
+
+1. Fetch sectors.
+2. After selecting a sector, fetch its `MITIGATION_MEASURE` Sector Measures.
+3. After selecting a Sector Measure, fetch its linked actions.
+4. After selecting an action code, fetch its dynamic schema.
+5. Render and validate the returned fields.
+6. Submit `category`, `sectorMeasureCategoryUid`, and `values`.
+
+When a parent selection changes, clear every child selection and its values.
+
+## API reference
+
+| Purpose | Method | Actual path |
+|---|---:|---|
+| Sectors | GET | `/env/api/v1/carbon/sectors` |
+| Mitigation Sector Measures | GET | `/climate-change/api/v1/config/sector-measures/{sectorId}/MITIGATION_MEASURE` |
+| Actions for Sector Measure | GET | `/climate-change/api/v1/config/sector-measure-action/{sectorMeasureUid}/actions` |
+| Dynamic schema by code | GET | `/climate-change/api/v1/climate-change/sector-measure-fields/{code}` |
+| Coverage options | GET | `/climate-change/api/v1/climate-change/sector-measure-fields/coverage-options` |
+| Ownership options | GET | `/climate-change/api/v1/climate-change/sector-measure-fields/owner-ship-types` |
+| Regions | GET | `/env/api/v1/config/regions` |
+| Districts | GET | `/env/api/v1/config/regions/{regionId}/districts` |
+| Councils for District | GET | `/env/api/v1/config/regions/{regionId}/districts/{districtId}/councils` |
+| Councils for Region | GET | `/env/api/v1/config/regions/councils/{regionId}` |
+| Create record | POST | `/climate-change/api/v1/climate-change/measure-action-field-data-request` |
+| Record details/edit data | GET | `/climate-change/api/v1/climate-change/measure-action-field-data-request/{uid}` |
+| Update record | PUT | `/climate-change/api/v1/climate-change/measure-action-field-data-request/{uid}` |
+| List/filter records | GET | `/climate-change/api/v1/climate-change/measure-action-field-data-request` |
+| Delete record | DELETE | `/climate-change/api/v1/climate-change/measure-action-field-data-request/{uid}` |
+
+### List filters
+
+`page`, `size`, `searchKeyword`, `measureType`, `sectorId`, `sectorMeasureUid`, `category`, `coverage`, `regionId`, `councilId`, `year`, and `approvalStatus`. Existing frontend aliases `search` and `adaptiveMitigationType` remain supported.
+
+Example:
+
+```http
+GET /climate-change/api/v1/climate-change/measure-action-field-data-request?measureType=MITIGATION_MEASURE&coverage=TANZANIA_MAINLAND&sectorId=6&year=2026&page=0&size=20
+```
+
+## Coverage
+
+```json
+[
+  { "value": "TANZANIA_MAINLAND", "label": "Tanzania Mainland" },
+  { "value": "ZANZIBAR", "label": "Zanzibar" }
+]
+```
+
+Coverage is stored at `values.coverage`. New and updated mitigation records reject missing or unsupported values. When `Region.coverage` is configured, the backend also rejects a Region/Coverage mismatch.
+
+The inspected database currently has no `Region.coverage` classifications. Administrators must classify Region master data as `MAINLAND` or `ZANZIBAR` before strict geographic matching can occur. The backend deliberately does not invent that classification.
+
+## Dynamic schema properties
+
+| Property | Meaning |
+|---|---|
+| `name` | Stable JSON property submitted in `values` |
+| `label` | User-facing field label |
+| `type` | `string`, `number`, `textarea`, `select`, `multiselect`, or `array` |
+| `dataType` | Expected serialized type |
+| `required` | Whether a value is mandatory |
+| `sourceApi` | API used to populate a select |
+| `options` | Inline `{value,label}` objects or primitive allowed values |
+| `min`, `max` | Numeric bounds validated by the backend |
+| `unit` | Display/reporting unit where defined |
+| `description` | Additional field guidance |
+| `visibleWhen` | Map of sibling values required for conditional validation |
+| `arrayFields` | Nested schema for repeatable groups |
+
+The existing frontend renderer must map `options`, `unit`, `description`, `min`, `max`, and `visibleWhen` if it does not already support them. Backend validation is authoritative.
+
+### Schema response example
+
+`GET /climate-change/api/v1/climate-change/sector-measure-fields/POWER_PRODUCTION`
 
 ```json
 {
-  "success": false,
-  "message": "year cannot be combined with startYear or endYear",
-  "data": null
+  "success": true,
+  "message": "Fetched all Measure Action Fields of POWER_PRODUCTION",
+  "data": {
+    "category": "POWER_PRODUCTION",
+    "data": {
+      "category": "POWER_PRODUCTION",
+      "fields": [
+        {"name":"coverage","label":"Coverage","type":"select","dataType":"string","required":true,"sourceApi":"/climate-change/api/v1/climate-change/sector-measure-fields/coverage-options"},
+        {"name":"regionId","label":"Region","type":"select","dataType":"number","required":true,"sourceApi":"/env/api/v1/config/regions"},
+        {"name":"councilId","label":"Council","type":"select","dataType":"number","required":true,"sourceApi":"/env/api/v1/config/regions/councils/{regionId}"},
+        {"name":"year","label":"Year of Establishment","type":"number","dataType":"number","required":true,"min":1900,"max":2100},
+        {"name":"name","label":"Name","type":"string","dataType":"string","required":true},
+        {"name":"installedCapacity","label":"Installed Capacity (MW)","type":"number","dataType":"number","required":true,"min":0}
+      ]
+    }
+  }
 }
 ```
 
-## Supported filters
+The response can contain additional ownership, gas-reduction, or legacy optional fields. Always render the complete returned `fields` array rather than copying this shortened example.
 
-| Query parameter | Type | Meaning |
-|---|---:|---|
-| `year` | integer | Exact reporting year. Do not combine with `startYear` or `endYear`. |
-| `startYear` | integer | First reporting year, inclusive. |
-| `endYear` | integer | Last reporting year, inclusive. |
-| `sectorId` | positive integer | Existing sector database identifier. |
-| `contributorId` | positive integer | Existing contributor database identifier. |
-| `gasType` | string | Gas display name, UUID, or supported code such as `CO2`, `CH4`, `N2O`, or `HFCs`. |
-| `regionId` | positive integer | Existing region identifier; Land Use removal analytics only. |
-| `districtId` | positive integer | Existing district identifier. The legacy Land Use form calls its council selection “District”, so a selected council ID is also accepted. |
-| `wasteSubcategoryId` | positive integer | Existing Waste subcategory identifier. |
-| `transportMode` | string | Existing transport enum/display value, for example `ROAD`. |
-| `fuelCategoryId` | positive integer | Existing fuel-category identifier. |
-| `carbonSinkId` | positive integer | Existing carbon-sink/restoration-type identifier. |
+## Common field reference
 
-Years must be between 1900 and 3000. `startYear` must not be greater than `endYear`.
+Every migrated mitigation action includes these fields:
 
-## Error handling
+| Field Name | Label | Type | Required | Unit | Description |
+|---|---|---:|---:|---|---|
+| `coverage` | Coverage | select | Yes | — | `TANZANIA_MAINLAND` or `ZANZIBAR` |
+| `regionId` | Region | select/number | Yes | — | Existing Region ID |
+| `councilId` | Council | select/number | Yes | — | Existing Council ID; District is derived from Council |
+| `year` | Activity-specific year label | number | Yes | year | 1900–2100 |
+| `quantityReducedCO2` | Quantity Reduced (CO₂) | decimal | Yes where applicable | approved reporting unit | Stored separately; no automatic CO₂e conversion |
+| `quantityReducedCH4` | Quantity Reduced (CH₄) | decimal | Yes where applicable | approved reporting unit | Stored separately |
+| `quantityReducedN2O` | Quantity Reduced (N₂O) | decimal | Yes where applicable | approved reporting unit | Stored separately |
+| `quantityReducedHFCs` | Quantity Reduced (HFCs) | decimal | Yes where applicable | approved reporting unit | Stored separately |
 
-| Status | Meaning | Frontend action |
-|---:|---|---|
-| `200` | Successful aggregate, including a legitimate empty dataset | Render data or a no-data state. |
-| `400` | Invalid filter or filter combination | Correct the filter request and show the returned `message`. |
-| `401` | Missing, invalid, or expired JWT | Use the existing refresh/login flow. |
-| `403` | The user lacks the generated analytics permission | Show a permission message; do not retry continuously. |
-| `404` | Incorrect gateway or endpoint path | Verify the `/climate-change` gateway prefix. |
-| `500` | Controlled backend failure | Show an error state and log the request context. |
+Most facility actions also include `name` and `ownership`. Fetch the schema for the final authority on required fields.
 
-## Measurement units
+## Code-specific field reference
 
-- Data entry stores emission and removal amounts as `GgCO2e`.
-- Analytics responses return `tCO2e`.
-- Conversion: `1 GgCO2e = 1,000 tCO2e`.
-- Conversion: `1 MtCO2e = 1,000,000 tCO2e`.
-- Every analytics response includes its unit in `unit`, or inside a KPI `Metric`.
-- Do not add values carrying different physical units.
+The following list excludes the common fields above.
 
-## Complete API reference
+| Sector | Code | Code-specific fields |
+|---|---|---|
+| Energy | `IMPROVE_CLEAN_POWER_INTERCONNECTION_WITH_NEIGHBOURING_COUNTRIES` | `receivedCapacity` (MW) |
+| Energy | `CLEAN_TECHNOLOGIES_FOR_POWER_GENERATION` | repeatable `technologies[]`: `technologyType`, `name`, `installedCapacity`, `productionCapacity`, `ownership`, four gas reductions |
+| Energy | `POWER_PRODUCTION` | `installedCapacity` (MW), `naturalGasConsumed` (MMscfd) |
+| Energy | `COOKING` | `numberOfHouseholds`, `numberOfInstitutions`, `numberOfBeneficiaries`, `naturalGasConsumed` (MMscfd) |
+| Energy | `TRANSPORTATION` | `installedCapacity`, `vehiclesServed`, `naturalGasConsumed` (MMscfd) |
+| Energy | `MICRO_RENEWABLE_GENERATION` | `installedCapacity`, `productionCapacity` (MW) |
+| Energy | `MINI_GRID_RENEWABLE_GENERATION` | `installedCapacity`, `productionCapacity` (MW) |
+| Transport | `RAILWAY` | `transportType`, `capacity`, `networkDistance`, `coverageFrom`, `coverageTo` |
+| Transport | `ROAD_INFRASTRUCTURE` | `transportType`, optional `capacity`, `networkDistance`, `coverageFrom`, `coverageTo` |
+| Transport | `BUS_RAPID_TRANSIT` | `transportType`, `vehicleNumber`, `populationServed`, `energySource`, `energyConsumptionPerDay` |
+| Transport | `LOCOMOTIVES` | `transportType`, `vehicleNumber`, `capacity`, `energySource`, `energyConsumptionPerDay` |
+| Transport | `PRIVATE_VEHICLES` | `transportType`, `vehicleNumber`, `energySource`, `energyConsumptionPerDay` |
+| Transport | `CYCLING` | `transportType`, optional `capacity`, `populationServed`, `networkDistance`, `coverageFrom`, `coverageTo` |
+| Transport | `PEDESTRIAN` | `transportType`, `populationServed`, `networkDistance`, `coverageFrom`, `coverageTo` |
+| Forest | `COMMUNITY_BASED_FOREST_MANAGEMENT` | `coverageArea`, `managementType`, `numberOfBeneficiaries` |
+| Forest | `JOINT_FOREST_MANAGEMENT` | `coverageArea`, `managementType`, `numberOfBeneficiaries` |
+| Forest | `PLANTED_FORESTS_AND_WOODLOTS` | `coverageArea`, `numberOfTrees`, `managementType`, `numberOfBeneficiaries` |
+| Forest | `AGROFOREST` | `coverageArea`, `numberOfTrees`, `managementType`, `numberOfBeneficiaries` |
+| Forest | `NATURAL_REGENERATION` | `coverageArea`, optional `numberOfTrees`, `managementType`, `numberOfBeneficiaries` |
+| Forest | `MANGROVES_RESTORATION` | `coverageArea`, `numberOfTrees`, `managementType`, `numberOfBeneficiaries` |
+| Forest | `AGROSILVIPASTORAL` | `coverageArea`, optional `numberOfTrees`, `managementType`, `numberOfBeneficiaries` |
+| Waste | `RECYCLING` | `industryName`, `wasteType`, `installedCapacity`, `productionCapacity`, `numberOfBeneficiaries` |
+| Waste | `SORTING` | `industryName`, `wasteType`, `sortingCapacity`, `numberOfBeneficiaries` |
+| Waste | `LANDFILL` | `industryName`, `wasteType`, `landfillCapacity`, `organicWasteReceivingCapacity`, `landfillSize`, `numberOfBeneficiaries` |
+| Waste | `BIOGAS_COW_DUNG` | `installedCapacity` (m³), `productionCapacityPerDay` (m³), `numberOfBeneficiaries` |
+| Waste | `ALTERNATIVE_CHARCOAL_PRODUCTION` | `charcoalProductionMaterials`, `installedCapacity`, `productionCapacityPerDay`, `numberOfBeneficiaries` |
+| Industry | `DIVERSIFICATION_OF_CLEAN_ENERGY_SOURCES` | `industryName`, `installedCapacity`, `productionCapacity`, repeatable `energySources[]`: `source`, `consumption`, `unit`, `ownership`, four gas reductions |
+| Livestock | `SILVICULTURE` | `activityType`, `coverageArea`, `treesCropsLivestockDetails`, `managementType`, `numberOfBeneficiaries` |
+| Livestock | `AGRO_SILVOPASTURE` | same Livestock Management fields |
+| Livestock | `SILVOPASTURE` | same Livestock Management fields |
+| Livestock | `LAND_RANGE_RESTORATION` | same Livestock Management fields |
+| Livestock | `FARMS_WITH_IMPROVED_LIVESTOCK_BREEDS` | `coverageArea`, `livestockProductionCapacity`, `numberOfBeneficiaries` |
+| Livestock | `FARMS_WITH_IMPROVED_LIVESTOCK_FODDERS` | `coverageArea`, `fodderProductionCapacity`, `numberOfBeneficiaries` |
 
-All paths below are relative to:
+## Create example
 
-```text
-${NEXT_PUBLIC_API_BASE_URL_80}/climate-change/api/v1/ghg-emissions/analytics
+```http
+POST /climate-change/api/v1/climate-change/measure-action-field-data-request
 ```
-
-| Dashboard | Graph / operation | Method | API endpoint | Applicable filters |
-|---|---|---|---|---|
-| Overview | Dashboard Summary — 3 KPI cards | GET | `/summary` | all applicable emission and removal filters |
-| Overview | Amount of GHG Emissions per Sector | GET | `/emissions-by-sector` | year/range, sector, contributor, gas, Waste/Transport classification |
-| Overview | Trend of GHG Emissions per Sector | GET | `/emissions-trend-by-sector` | year/range, sector, contributor, gas, Waste/Transport classification |
-| Overview | Emissions by Gas Type per Sector | GET | `/emissions-by-gas-sector` | year/range, sector, contributor, gas, Waste/Transport classification |
-| Overview | Trend of Emissions by GHG Type | GET | `/emissions-trend-by-gas` | year/range, sector, contributor, gas, Waste/Transport classification |
-| Energy | Emissions per Contributor | GET | `/sectors/energy/contributors` | year/range, contributor, gas |
-| Energy | Contributor Emission Trends | GET | `/sectors/energy/trends` | year/range, contributor, gas |
-| Industrial Process | Emissions per Contributor | GET | `/sectors/industrial-process/contributors` | year/range, contributor, gas |
-| Industrial Process | Contributor Emission Trends | GET | `/sectors/industrial-process/trends` | year/range, contributor, gas |
-| Mining | Emissions per Contributor | GET | `/sectors/mining/contributors` | year/range, contributor, gas |
-| Mining | Contributor Emission Trends | GET | `/sectors/mining/trends` | year/range, contributor, gas |
-| Agriculture | Emissions per Contributor | GET | `/sectors/agriculture/contributors` | year/range, contributor, gas |
-| Agriculture | Contributor Emission Trends | GET | `/sectors/agriculture/trends` | year/range, contributor, gas |
-| Livestock | Emissions per Contributor | GET | `/sectors/livestock/contributors` | year/range, contributor, gas |
-| Livestock | Contributor Emission Trends | GET | `/sectors/livestock/trends` | year/range, contributor, gas |
-| Human Settlement | Emissions per Contributor | GET | `/sectors/human-settlement/contributors` | year/range, contributor, gas |
-| Human Settlement | Contributor Emission Trends | GET | `/sectors/human-settlement/trends` | year/range, contributor, gas |
-| Waste | Emissions by Subcategory | GET | `/sectors/waste/subcategories` | year/range, subcategory, contributor, gas |
-| Waste | Subcategory Trends | GET | `/sectors/waste/subcategories/trends` | year/range, subcategory, contributor, gas |
-| Waste | Emissions by Contributor | GET | `/sectors/waste/contributors` | year/range, subcategory, contributor, gas |
-| Waste | Contributor Trends | GET | `/sectors/waste/contributors/trends` | year/range, subcategory, contributor, gas |
-| Transport | Emissions by Transport Mode | GET | `/sectors/transport/modes` | year/range, mode, contributor, fuel, gas |
-| Transport | Transport Mode Trends | GET | `/sectors/transport/modes/trends` | year/range, mode, contributor, fuel, gas |
-| Transport | Emissions by Fuel Category | GET | `/sectors/transport/fuels` | year/range, mode, contributor, fuel, gas |
-| Transport | Fuel Category Trends | GET | `/sectors/transport/fuels/trends` | year/range, mode, contributor, fuel, gas |
-| Land Use | Removals by Carbon Sink | GET | `/sectors/land-use/removals-by-sink` | year/range, region, district, sink, gas |
-| Land Use | Carbon Sink Removal Trends | GET | `/sectors/land-use/removals-trend` | year/range, region, district, sink, gas |
-| Land Use | Regional Removal Heatmap | GET | `/sectors/land-use/removals-by-region` | year/range, region, district, sink, gas |
-
-## Individual API documentation
-
-The numeric values in examples illustrate the actual DTO shape. Production values always come from PostgreSQL.
-
-### 1. GHG Dashboard Summary
-
-**Endpoint:** `/summary`  
-**Method:** `GET`  
-**Purpose:** Supplies Total GHG Emissions, Amount of GHGs Reduced, and emission totals per gas. `totalGhgReduced` is sourced from saved Amount of GHGs Removed rows.  
-**Supported filters:** `year`, `startYear`, `endYear`, `sectorId`, `contributorId`, `gasType`, `regionId`, `districtId`, `wasteSubcategoryId`, `transportMode`, `fuelCategoryId`, `carbonSinkId`  
-**Example request:** `/summary`
-
-**Example response:**
 
 ```json
-{"success":true,"message":"GHG dashboard summary retrieved","data":{"totalEmissions":{"value":0,"unit":"tCO2e","source":null},"totalGhgReduced":{"value":15883300,"unit":"tCO2e","source":"AMOUNT_OF_GHGS_REMOVED"},"gasBreakdown":[],"filters":{"year":null,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}
+{
+  "category": "POWER_PRODUCTION",
+  "sectorMeasureCategoryUid": "<USE-UID-RETURNED-BY-SECTOR-MEASURES-API>",
+  "values": {
+    "name": "Example Gas Power Facility",
+    "coverage": "TANZANIA_MAINLAND",
+    "regionId": 1,
+    "councilId": 10,
+    "year": 2026,
+    "installedCapacity": 100.5,
+    "naturalGasConsumed": 12.75,
+    "ownership": "GOVERNMENT",
+    "quantityReducedCO2": 25.5,
+    "quantityReducedCH4": 2.3,
+    "quantityReducedN2O": 0.5,
+    "quantityReducedHFCs": 0
+  }
+}
 ```
 
-**Frontend usage:** Render `data.totalEmissions.value`, `data.totalGhgReduced.value`, and `data.gasBreakdown`. Use each metric's `unit`; use `gasBreakdown[].name` as the label and `gasBreakdown[].total` as the value.
+Successful response data contains `id`, `uid`, `category`, `values`, `sectorMeasureCategory`, `currentStage`, `approvalStatus`, `createdDate`, `lastModifiedDate`, `createdBy`, and top-level `council`, `district`, and `region` display objects. The `values` object remains the exact editable dynamic payload, so a response can be safely reused for an update without stripping display-only properties.
 
-### 2. Amount of GHG Emissions per Sector
-
-**Endpoint:** `/emissions-by-sector`  
-**Method:** `GET`  
-**Purpose:** Returns eligible positive emissions grouped by sector. Land Use removals are not mixed into these totals.  
-**Supported filters:** `year`, `startYear`, `endYear`, `sectorId`, `contributorId`, `gasType`, `wasteSubcategoryId`, `transportMode`, `fuelCategoryId`  
-**Example request:** `/emissions-by-sector?startYear=2021&endYear=2026`
-
-**Example response:**
+### Record response example
 
 ```json
-{"success":true,"message":"GHG emissions by sector retrieved","data":{"contextCode":"GHG_INVENTORY","contextName":"GHG Inventory","unit":"tCO2e","data":[{"id":"6","code":"58a6560e-05e0-462d-9969-f4ecf46bb749","name":"Energy","total":1250}],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}
+{
+  "success": true,
+  "message": "Data saved successfully",
+  "data": {
+    "id": 1201,
+    "uid": "<GENERATED-RECORD-UID>",
+    "category": "POWER_PRODUCTION",
+    "values": {
+      "name": "Example Gas Power Facility",
+      "coverage": "TANZANIA_MAINLAND",
+      "regionId": 1,
+      "councilId": 10,
+      "year": 2026,
+      "installedCapacity": 100.5,
+      "naturalGasConsumed": 12.75,
+      "ownership": "GOVERNMENT",
+      "quantityReducedCO2": 25.5,
+      "quantityReducedCH4": 2.3,
+      "quantityReducedN2O": 0.5,
+      "quantityReducedHFCs": 0
+    },
+    "sectorMeasureCategory": {"name":"Use of Natural Gas","uid":"<SECTOR-MEASURE-UID>","adaptiveMitigationType":"MITIGATION_MEASURE"},
+    "currentStage": null,
+    "approvalStatus": "PENDING",
+    "createdDate": "2026-11-11T03:00:00Z",
+    "lastModifiedDate": "2026-11-11T03:00:00Z",
+    "createdBy": "<AUTHENTICATED-USER>",
+    "council": {"id":10,"name":"<COUNCIL-NAME>"},
+    "district": {"id":5,"name":"<DISTRICT-NAME>"},
+    "region": {"id":1,"name":"<REGION-NAME>"}
+  }
+}
 ```
 
-**Frontend usage:** Horizontal bar chart: `data.data[].name` → category label; `data.data[].total` → bar value.
+### List response shape
 
-### 3. Trend of GHG Emissions per Sector
-
-**Endpoint:** `/emissions-trend-by-sector`  
-**Method:** `GET`  
-**Purpose:** Returns one yearly series for each sector using saved reporting years.  
-**Supported filters:** same emission filters as API 2  
-**Example request:** `/emissions-trend-by-sector?startYear=2021&endYear=2026`
-
-**Example response:**
+The list endpoint returns the standard Spring `Page` inside `data`:
 
 ```json
-{"success":true,"message":"GHG sector trends retrieved","data":{"contextCode":"GHG_INVENTORY","contextName":"GHG Inventory","unit":"tCO2e","years":[2024,2025,2026],"series":[{"id":"6","code":"ENERGY","name":"Energy","values":[1000,null,1250]}],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}
+{"success":true,"message":"Fetched all measure action data","data":{"content":[],"totalElements":0,"totalPages":0,"size":20,"number":0,"first":true,"last":true,"empty":true}}
 ```
 
-**Frontend usage:** `data.years` is the shared X-axis. Each `data.series[]` becomes one line; align `series.values[index]` with `years[index]`. Preserve `null` as a gap.
+An empty page means no records matched; it is not an error and is different from a record whose numeric values are explicitly zero.
 
-### 4. Emissions by Gas Type per Sector
-
-**Endpoint:** `/emissions-by-gas-sector`  
-**Method:** `GET`  
-**Purpose:** Returns sector/gas cells for a stacked sector chart.  
-**Supported filters:** same emission filters as API 2  
-**Example request:** `/emissions-by-gas-sector?year=2026&gasType=CO2`
-
-**Example response:**
+### Error response shapes
 
 ```json
-{"success":true,"message":"GHG emissions by gas and sector retrieved","data":{"unit":"tCO2e","data":[{"sectorId":"6","sectorCode":"ENERGY","sectorName":"Energy","gasTypeId":"10509","gasTypeCode":"CO2","gasTypeName":"CO2","total":1250}],"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":"CO2","regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}
+{"success":false,"message":"Coverage is required for Mitigation Measures","data":{"error":"Coverage is required for Mitigation Measures"}}
 ```
 
-**Frontend usage:** Group rows by `sectorName`; create stack keys from `gasTypeName`; use `total` for each stack cell.
+Schema/duplicate/field validation returns HTTP 400. A missing record or Council returns HTTP 404; unauthenticated and unauthorized calls return HTTP 401 and 403 respectively. The existing global workflow remains responsible for approval transitions; this enhancement does not add or bypass a separate approval endpoint.
 
-### 5. Trend of Emissions by GHG Type
+## Update and edit
 
-**Endpoint:** `/emissions-trend-by-gas`  
-**Method:** `GET`  
-**Purpose:** Returns yearly CO2, CH4, N2O, HFCs, and any other actually reported gas series.  
-**Supported filters:** same emission filters as API 2  
-**Example request:** `/emissions-trend-by-gas?startYear=2021&endYear=2026`
+Load the record first:
 
-**Example response:**
+```http
+GET /climate-change/api/v1/climate-change/measure-action-field-data-request/{uid}
+```
+
+Fetch the schema for its returned `category`, populate the form using `values`, then submit the complete validated payload:
+
+```http
+PUT /climate-change/api/v1/climate-change/measure-action-field-data-request/{uid}
+```
+
+Approved and Reviewed records cannot be edited. The update excludes itself from duplicate detection and preserves its audit identity and workflow state.
+
+## Duplicate rules
+
+Candidates are found by code, year, and Council. If a record contains an identity field (`name`, `industryName`, `plantName`, `gasStationName`, `routeName`, or `activityName`), a conflict occurs only when that identity also matches. This permits multiple named facilities in the same Council/year. Records without an identity retain the original code/year/Council protection.
+
+## Sector payload examples
+
+Only code-specific portions are shortened below; include every common required field returned by the schema.
+
+```jsonc
+// Transport
+{"category":"CYCLING","sectorMeasureCategoryUid":"<UID>","values":{"name":"City Cycle Route","coverage":"TANZANIA_MAINLAND","regionId":1,"councilId":10,"year":2026,"transportType":"CYCLING","populationServed":20000,"networkDistance":14.2,"coverageFrom":"A","coverageTo":"B","ownership":"GOVERNMENT","quantityReducedCO2":10,"quantityReducedCH4":0,"quantityReducedN2O":0,"quantityReducedHFCs":0}}
+```
+
+```jsonc
+// Forestry
+{"category":"NATURAL_REGENERATION","sectorMeasureCategoryUid":"<UID>","values":{"name":"Regeneration Area","coverage":"TANZANIA_MAINLAND","regionId":1,"councilId":10,"year":2026,"coverageArea":500,"managementType":"COMMUNITY","numberOfBeneficiaries":1200,"quantityReducedCO2":80,"quantityReducedCH4":1,"quantityReducedN2O":0.2,"quantityReducedHFCs":0}}
+```
+
+```jsonc
+// Waste
+{"category":"LANDFILL","sectorMeasureCategoryUid":"<UID>","values":{"coverage":"TANZANIA_MAINLAND","regionId":1,"councilId":10,"year":2026,"industryName":"Example Landfill","wasteType":"ORGANIC_WASTE","landfillCapacity":5000,"organicWasteReceivingCapacity":1200,"landfillSize":20,"numberOfBeneficiaries":50000,"ownership":"GOVERNMENT","quantityReducedCO2":20,"quantityReducedCH4":30,"quantityReducedN2O":0,"quantityReducedHFCs":0}}
+```
+
+```jsonc
+// Industry
+{"category":"DIVERSIFICATION_OF_CLEAN_ENERGY_SOURCES","sectorMeasureCategoryUid":"<UID>","values":{"industryName":"Example Industry","coverage":"TANZANIA_MAINLAND","regionId":1,"councilId":10,"year":2026,"installedCapacity":100,"productionCapacity":80,"energySources":[{"source":"HYDROPOWER","consumption":120,"unit":"MW","ownership":"PRIVATE","quantityReducedCO2":10,"quantityReducedCH4":2,"quantityReducedN2O":1,"quantityReducedHFCs":0}]}}
+```
+
+```jsonc
+// Livestock
+{"category":"FARMS_WITH_IMPROVED_LIVESTOCK_BREEDS","sectorMeasureCategoryUid":"<UID>","values":{"name":"Example Farm","coverage":"TANZANIA_MAINLAND","regionId":1,"councilId":10,"year":2026,"coverageArea":75,"livestockProductionCapacity":400,"numberOfBeneficiaries":90,"ownership":"COMMUNITY","quantityReducedCO2":12,"quantityReducedCH4":5,"quantityReducedN2O":1,"quantityReducedHFCs":0}}
+```
+
+## cURL
+
+```bash
+curl -H "Authorization: Bearer $ACCESS_TOKEN" \
+  "$API_BASE_URL/climate-change/api/v1/climate-change/sector-measure-fields/coverage-options"
+```
+
+```bash
+curl -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H "Content-Type: application/json" \
+  --data @mitigation-record.json \
+  "$API_BASE_URL/climate-change/api/v1/climate-change/measure-action-field-data-request"
+```
+
+## Errors and troubleshooting
+
+| Problem | Meaning/action |
+|---|---|
+| `No schema defined for category ...` | Apply the mitigation schema migration and verify the code |
+| `Code ... does not belong to Sector Measure ...` | Refresh actions and use the action linked to the selected measure |
+| `Coverage is required` | Include one of the two exact Coverage values |
+| `Selected Region does not belong to ...` | Correct Coverage or Region master-data classification |
+| `Selected Council does not belong to the selected Region` | Clear stale Council after Region changes |
+| `Duplicate mitigation record ...` | Change the facility identity or confirm this is an existing report |
+| `Invalid field ...` | Build `values` only from the selected code schema |
+| `... must be at least 0` | Capacities and reductions cannot be negative |
+| HTTP 401/403 | Check JWT and generated controller-method permissions |
+
+## Database deployment
+
+Migration files:
+
+- `src/main/resources/db/changelog/2026-11-11-mitigation-measure-schemas.yaml`
+- `src/main/resources/db/changelog/2026-11-11-mitigation-measure-schemas.sql`
+
+The SQL is idempotent and was validated inside a rollback transaction. This project currently has `spring.liquibase.enabled=false`; deployment must run the changelog through the environment’s normal migration process or explicitly enable Liquibase. Do not run the SQL repeatedly by hand as a substitute for migration tracking.
+
+---
+
+## Ready-to-use test payloads
+
+The five examples below are based on the supplied migration configuration and its local test IDs. **These IDs and UIDs are environment-specific**: use values returned by your own lookup endpoints if they differ. Apply the migration before testing.
+
+| Test location | Example value |
+|---|---|
+| Region | Dar es Salaam |
+| `regionId` | `1` |
+| Council | Temeke Municipal |
+| `councilId` | `1` |
+
+**Request**
+
+```http
+POST /climate-change/api/v1/climate-change/measure-action-field-data-request
+Authorization: Bearer <ACCESS_TOKEN>
+Content-Type: application/json
+```
+
+### 1. Energy — Power Production
 
 ```json
-{"success":true,"message":"GHG gas trends retrieved","data":{"contextCode":"GHG_INVENTORY","contextName":"GHG Inventory","unit":"tCO2e","years":[2024,2025,2026],"series":[{"id":"10509","code":"CO2","name":"CO2","values":[1000,null,1250]}],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}
+{
+  "category": "POWER_PRODUCTION",
+  "sectorMeasureCategoryUid": "48c8a872-d955-f3cb-28bb-570e1242c1d9",
+  "values": {
+    "name": "Temeke Natural Gas Power Plant",
+    "coverage": "TANZANIA_MAINLAND",
+    "regionId": 1,
+    "councilId": 1,
+    "year": 2026,
+    "installedCapacity": 150.5,
+    "naturalGasConsumed": 23.75,
+    "ownership": "GOVERNMENT",
+    "quantityReducedCO2": 125.5,
+    "quantityReducedCH4": 4.2,
+    "quantityReducedN2O": 1.1,
+    "quantityReducedHFCs": 0
+  }
+}
 ```
 
-**Frontend usage:** Multi-line chart using `years`, `series[].name`, and aligned `series[].values`.
-
-### 6. Energy Emissions per Contributor
-
-**Endpoint:** `/sectors/energy/contributors`  
-**Method:** `GET`  
-**Purpose:** Groups Energy emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/energy/contributors?year=2026`  
-**Example response:** `{"success":true,"message":"Contributor emissions retrieved","data":{"contextCode":"ENERGY","contextName":"Energy","unit":"tCO2e","data":[{"id":"10552","code":"85cfd72c-15da-426c-bee9-fa235fa13de1","name":"Energy - Public","total":1250}],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Lollipop/bar chart: `data.data[].name` → label; `data.data[].total` → value.
-
-### 7. Energy Contributor Emission Trends
-
-**Endpoint:** `/sectors/energy/trends`  
-**Method:** `GET`  
-**Purpose:** Returns annual Energy emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/energy/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Contributor emission trends retrieved","data":{"contextCode":"ENERGY","contextName":"Energy","unit":"tCO2e","years":[2025,2026],"series":[{"id":"10552","code":"ENERGY_PUBLIC","name":"Energy - Public","values":[null,1250]}],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Line chart with `years` on X and `series[].values` on Y.
-
-### 8. Industrial Process Emissions per Contributor
-
-**Endpoint:** `/sectors/industrial-process/contributors`  
-**Method:** `GET`  
-**Purpose:** Groups Industrial Process and Product Use emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/industrial-process/contributors?year=2026`  
-**Example response:** `{"success":true,"message":"Contributor emissions retrieved","data":{"contextCode":"INDUSTRIAL_PROCESS_AND_PRODUCT_USE","contextName":"Industrial Process and Product Use","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Contributor comparison bar chart using `data[].name` and `data[].total`; show no-data UI when `data.length === 0`.
-
-### 9. Industrial Process Contributor Trends
-
-**Endpoint:** `/sectors/industrial-process/trends`  
-**Method:** `GET`  
-**Purpose:** Returns yearly Industrial Process emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/industrial-process/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Contributor emission trends retrieved","data":{"contextCode":"INDUSTRIAL_PROCESS_AND_PRODUCT_USE","contextName":"Industrial Process and Product Use","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Multi-line chart; render no-data UI when `series.length === 0`.
-
-### 10. Mining Emissions per Contributor
-
-**Endpoint:** `/sectors/mining/contributors`  
-**Method:** `GET`  
-**Purpose:** Groups Mining Industry emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/mining/contributors?year=2026`  
-**Example response:** `{"success":true,"message":"Contributor emissions retrieved","data":{"contextCode":"MINING","contextName":"Mining Industry","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Donut chart: `name` → slice label; `total` → slice value.
-
-### 11. Mining Contributor Emission Trends
-
-**Endpoint:** `/sectors/mining/trends`  
-**Method:** `GET`  
-**Purpose:** Returns annual Mining emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/mining/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Contributor emission trends retrieved","data":{"contextCode":"MINING","contextName":"Mining Industry","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Line chart using `years`, `series[].name`, and `series[].values`.
-
-### 12. Agriculture Emissions per Contributor
-
-**Endpoint:** `/sectors/agriculture/contributors`  
-**Method:** `GET`  
-**Purpose:** Groups Agriculture emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/agriculture/contributors?year=2026`  
-**Example response:** `{"success":true,"message":"Contributor emissions retrieved","data":{"contextCode":"AGRICULTURE","contextName":"Agriculture","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Horizontal bar chart using `name` and `total`.
-
-### 13. Agriculture Contributor Emission Trends
-
-**Endpoint:** `/sectors/agriculture/trends`  
-**Method:** `GET`  
-**Purpose:** Returns yearly Agriculture emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/agriculture/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Contributor emission trends retrieved","data":{"contextCode":"AGRICULTURE","contextName":"Agriculture","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Area/line chart; `null` means no observation and should remain a gap.
-
-### 14. Livestock Emissions per Contributor
-
-**Endpoint:** `/sectors/livestock/contributors`  
-**Method:** `GET`  
-**Purpose:** Groups Livestock emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/livestock/contributors?year=2026`  
-**Example response:** `{"success":true,"message":"Contributor emissions retrieved","data":{"contextCode":"LIVESTOCK","contextName":"Livestock","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Horizontal bar chart using `name` and `total`.
-
-### 15. Livestock Contributor Emission Trends
-
-**Endpoint:** `/sectors/livestock/trends`  
-**Method:** `GET`  
-**Purpose:** Returns annual Livestock emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/livestock/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Contributor emission trends retrieved","data":{"contextCode":"LIVESTOCK","contextName":"Livestock","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Stepped/area chart using the aligned trend arrays.
-
-### 16. Human Settlement Emissions per Contributor
-
-**Endpoint:** `/sectors/human-settlement/contributors`  
-**Method:** `GET`  
-**Purpose:** Groups Human Settlement emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/human-settlement/contributors?year=2026`  
-**Example response:** `{"success":true,"message":"Contributor emissions retrieved","data":{"contextCode":"HUMAN_SETTLEMENT","contextName":"Human Settlement","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Lollipop/bar chart using `name` and `total`.
-
-### 17. Human Settlement Contributor Trends
-
-**Endpoint:** `/sectors/human-settlement/trends`  
-**Method:** `GET`  
-**Purpose:** Returns annual Human Settlement emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `contributorId`, `gasType`  
-**Example request:** `/sectors/human-settlement/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Contributor emission trends retrieved","data":{"contextCode":"HUMAN_SETTLEMENT","contextName":"Human Settlement","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Area/line chart using `years` and `series`.
-
-### 18. Waste Emissions by Subcategory
-
-**Endpoint:** `/sectors/waste/subcategories`  
-**Method:** `GET`  
-**Purpose:** Groups eligible Waste emissions by the saved Waste subcategory relationship.  
-**Supported filters:** `year`, `startYear`, `endYear`, `wasteSubcategoryId`, `contributorId`, `gasType`  
-**Example request:** `/sectors/waste/subcategories?year=2026`  
-**Example response:** `{"success":true,"message":"Waste emissions by subcategory retrieved","data":{"contextCode":"WASTE","contextName":"Waste","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Donut chart using `data[].name` for labels and `data[].total` for values.
-
-### 19. Waste Emission Trends by Subcategory
-
-**Endpoint:** `/sectors/waste/subcategories/trends`  
-**Method:** `GET`  
-**Purpose:** Returns annual Waste emissions grouped by subcategory.  
-**Supported filters:** `year`, `startYear`, `endYear`, `wasteSubcategoryId`, `contributorId`, `gasType`  
-**Example request:** `/sectors/waste/subcategories/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Waste subcategory trends retrieved","data":{"contextCode":"WASTE","contextName":"Waste","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Multi-line chart: `years` → X-axis; one `series` entry per subcategory.
-
-### 20. Waste Emissions by Contributor
-
-**Endpoint:** `/sectors/waste/contributors`  
-**Method:** `GET`  
-**Purpose:** Groups Waste emissions by the actual contributor selected under each subcategory.  
-**Supported filters:** `year`, `startYear`, `endYear`, `wasteSubcategoryId`, `contributorId`, `gasType`  
-**Example request:** `/sectors/waste/contributors?wasteSubcategoryId=12&year=2026`  
-**Example response:** `{"success":true,"message":"Contributor emissions retrieved","data":{"contextCode":"WASTE","contextName":"Waste","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":12,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Lollipop chart using `name` and `total`.
-
-### 21. Waste Contributor Trends
-
-**Endpoint:** `/sectors/waste/contributors/trends`  
-**Method:** `GET`  
-**Purpose:** Returns annual Waste emissions by contributor.  
-**Supported filters:** `year`, `startYear`, `endYear`, `wasteSubcategoryId`, `contributorId`, `gasType`  
-**Example request:** `/sectors/waste/contributors/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Contributor emission trends retrieved","data":{"contextCode":"WASTE","contextName":"Waste","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Multi-line chart using aligned `years` and `series[].values`.
-
-### 22. Transport Emissions by Mode
-
-**Endpoint:** `/sectors/transport/modes`  
-**Method:** `GET`  
-**Purpose:** Groups Transport emissions by the saved means of transport.  
-**Supported filters:** `year`, `startYear`, `endYear`, `transportMode`, `contributorId`, `fuelCategoryId`, `gasType`  
-**Example request:** `/sectors/transport/modes?year=2026&transportMode=ROAD`  
-**Example response:** `{"success":true,"message":"Transport emissions by mode retrieved","data":{"contextCode":"TRANSPORT","contextName":"Transport","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":"ROAD","fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Polar/circular bar or category bar chart using `name` and `total`. Current local database has no Transport category records, so an empty result is expected until records are submitted.
-
-### 23. Transport Mode Trends
-
-**Endpoint:** `/sectors/transport/modes/trends`  
-**Method:** `GET`  
-**Purpose:** Returns annual Transport emissions by mode.  
-**Supported filters:** `year`, `startYear`, `endYear`, `transportMode`, `contributorId`, `fuelCategoryId`, `gasType`  
-**Example request:** `/sectors/transport/modes/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Transport mode trends retrieved","data":{"contextCode":"TRANSPORT","contextName":"Transport","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Area/line chart. Current local database has no Transport category history.
-
-### 24. Transport Emissions by Fuel Category
-
-**Endpoint:** `/sectors/transport/fuels`  
-**Method:** `GET`  
-**Purpose:** Aggregates only fuel-specific saved amounts. It never assigns a contributor total to every selected fuel.  
-**Supported filters:** `year`, `startYear`, `endYear`, `transportMode`, `contributorId`, `fuelCategoryId`, `gasType`  
-**Example request:** `/sectors/transport/fuels?year=2026&fuelCategoryId=21`  
-**Example response:** `{"success":true,"message":"Transport emissions by fuel retrieved","data":{"contextCode":"TRANSPORT","contextName":"Transport","unit":"tCO2e","data":[],"unclassifiedAmount":0,"filters":{"year":2026,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":21,"carbonSinkId":null}}}`  
-**Frontend usage:** Horizontal bar chart using `name` and `total`. Current local database contains no fuel allocations, so this endpoint is expected to be empty until fuel-specific records are saved.
-
-### 25. Transport Fuel Category Trends
-
-**Endpoint:** `/sectors/transport/fuels/trends`  
-**Method:** `GET`  
-**Purpose:** Returns annual fuel-specific Transport emissions.  
-**Supported filters:** `year`, `startYear`, `endYear`, `transportMode`, `contributorId`, `fuelCategoryId`, `gasType`  
-**Example request:** `/sectors/transport/fuels/trends?startYear=2021&endYear=2026`  
-**Example response:** `{"success":true,"message":"Transport fuel trends retrieved","data":{"contextCode":"TRANSPORT","contextName":"Transport","unit":"tCO2e","years":[],"series":[],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2021,"endYear":2026,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}`  
-**Frontend usage:** Multi-line chart. Current local database contains no historical fuel allocations.
-
-### 26. Amount of GHGs Removed by Carbon Sink
-
-**Endpoint:** `/sectors/land-use/removals-by-sink`  
-**Method:** `GET`  
-**Purpose:** Groups authoritative Amount of GHGs Removed rows by saved carbon-sink/restoration type.  
-**Supported filters:** `year`, `startYear`, `endYear`, `regionId`, `districtId`, `carbonSinkId`, `gasType`  
-**Example request:** `/sectors/land-use/removals-by-sink?carbonSinkId=102`
-
-**Example response:**
+### 2. Transport — Bus Rapid Transit
 
 ```json
-{"success":true,"message":"GHG removals by carbon sink retrieved","data":{"contextCode":"LAND_USE_CHANGE","contextName":"Land Use Change","unit":"tCO2e","data":[{"id":"102","code":"102","name":"Afforestation","total":1012000}],"unclassifiedAmount":0,"filters":{"year":null,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":102}}}
+{
+  "category": "BUS_RAPID_TRANSIT",
+  "sectorMeasureCategoryUid": "0cd77aee-8abe-4fbb-bf24-9b7f1cf3fb45",
+  "values": {
+    "name": "Temeke Electric BRT Project",
+    "coverage": "TANZANIA_MAINLAND",
+    "regionId": 1,
+    "councilId": 1,
+    "year": 2026,
+    "transportType": "BRT",
+    "vehicleNumber": "BRT-EV-001",
+    "populationServed": 85000,
+    "energySource": "ELECTRICITY",
+    "energyConsumptionPerDay": 420.5,
+    "ownership": "GOVERNMENT",
+    "quantityReducedCO2": 250.75,
+    "quantityReducedCH4": 3.4,
+    "quantityReducedN2O": 0.8,
+    "quantityReducedHFCs": 0
+  }
+}
 ```
 
-**Frontend usage:** Horizontal bar chart using `name` and `total`.
-
-### 27. Trends of GHGs Removed by Carbon Sink
-
-**Endpoint:** `/sectors/land-use/removals-trend`  
-**Method:** `GET`  
-**Purpose:** Returns annual greenhouse-gas removals by carbon sink.  
-**Supported filters:** `year`, `startYear`, `endYear`, `regionId`, `districtId`, `carbonSinkId`, `gasType`  
-**Example request:** `/sectors/land-use/removals-trend?startYear=2020&endYear=2023`
-
-**Example response:**
+### 3. Forestry — Natural Regeneration
 
 ```json
-{"success":true,"message":"GHG removal trends retrieved","data":{"contextCode":"LAND_USE_CHANGE","contextName":"Land Use Change","unit":"tCO2e","years":[2020,2021,2022,2023],"series":[{"id":"102","code":"102","name":"Afforestation","values":[210400,458900,null,null]}],"unclassifiedAmount":0,"filters":{"year":null,"startYear":2020,"endYear":2023,"sectorId":null,"contributorId":null,"gasType":null,"regionId":null,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}
+{
+  "category": "NATURAL_REGENERATION",
+  "sectorMeasureCategoryUid": "d6a4e848-e69c-ef93-55ee-39f12a41bf01",
+  "values": {
+    "name": "Temeke Natural Forest Regeneration Programme",
+    "coverage": "TANZANIA_MAINLAND",
+    "regionId": 1,
+    "councilId": 1,
+    "year": 2026,
+    "coverageArea": 750.5,
+    "numberOfTrees": 125000,
+    "managementType": "COMMUNITY",
+    "numberOfBeneficiaries": 3200,
+    "quantityReducedCO2": 540.5,
+    "quantityReducedCH4": 8.25,
+    "quantityReducedN2O": 2.15,
+    "quantityReducedHFCs": 0
+  }
+}
 ```
 
-**Frontend usage:** Area chart using `years` and one `series` per carbon sink.
-
-### 28. Regional Carbon Removal Heatmap
-
-**Endpoint:** `/sectors/land-use/removals-by-region`  
-**Method:** `GET`  
-**Purpose:** Returns region/carbon-sink cells plus region and sink totals for a heatmap.  
-**Supported filters:** `year`, `startYear`, `endYear`, `regionId`, `districtId`, `carbonSinkId`, `gasType`  
-**Example request:** `/sectors/land-use/removals-by-region?regionId=9`
-
-**Example response:**
+### 4. Waste — Landfill
 
 ```json
-{"success":true,"message":"Regional GHG removals retrieved","data":{"unit":"tCO2e","regions":[{"id":"9","code":"1","name":"Arusha","total":1975200}],"carbonSinkTypes":[{"id":"111","code":"111","name":"Grassland Reseeding","total":412800}],"data":[{"regionId":"9","regionCode":"1","regionName":"Arusha","carbonSinkId":"111","carbonSinkCode":"111","carbonSinkName":"Grassland Reseeding","amountRemoved":412800}],"filters":{"year":null,"startYear":null,"endYear":null,"sectorId":null,"contributorId":null,"gasType":null,"regionId":9,"districtId":null,"wasteSubcategoryId":null,"transportMode":null,"fuelCategoryId":null,"carbonSinkId":null}}}
+{
+  "category": "LANDFILL",
+  "sectorMeasureCategoryUid": "3a6a7608-5fd3-da69-6ff3-545209a33974",
+  "values": {
+    "industryName": "Temeke Municipal Organic Waste Landfill",
+    "coverage": "TANZANIA_MAINLAND",
+    "regionId": 1,
+    "councilId": 1,
+    "year": 2026,
+    "wasteType": "ORGANIC_WASTE",
+    "landfillCapacity": 12000,
+    "organicWasteReceivingCapacity": 3500,
+    "landfillSize": 42.75,
+    "numberOfBeneficiaries": 150000,
+    "ownership": "GOVERNMENT",
+    "quantityReducedCO2": 180.5,
+    "quantityReducedCH4": 320.75,
+    "quantityReducedN2O": 1.4,
+    "quantityReducedHFCs": 0
+  }
+}
 ```
 
-**Frontend usage:** `regions[].name` supplies region labels, `carbonSinkTypes[].name` supplies sink labels/legend, and `data[].amountRemoved` supplies the heatmap cell value. Match cells by `regionId` and `carbonSinkId`.
+### 5. Livestock — Improved Livestock Breeds
 
-## GHG Dashboard Chart-to-API Mapping
+```json
+{
+  "category": "FARMS_WITH_IMPROVED_LIVESTOCK_BREEDS",
+  "sectorMeasureCategoryUid": "fa67ddaf-96a9-0bda-cddd-9711f1242431",
+  "values": {
+    "name": "Temeke Improved Dairy Breeds Farm",
+    "coverage": "TANZANIA_MAINLAND",
+    "regionId": 1,
+    "councilId": 1,
+    "year": 2026,
+    "coverageArea": 85.5,
+    "livestockProductionCapacity": 650,
+    "numberOfBeneficiaries": 240,
+    "ownership": "PRIVATE",
+    "quantityReducedCO2": 45.5,
+    "quantityReducedCH4": 80.25,
+    "quantityReducedN2O": 12.4,
+    "quantityReducedHFCs": 0
+  }
+}
+```
 
-| Chart | API | Recommended chart type | X-axis / label property | Y-axis / value property |
-|---|---|---|---|---|
-| Amount of GHG Emissions per Sector | `/emissions-by-sector` | Horizontal bar | `data.data[].name` | `data.data[].total` |
-| Trend of GHG Emissions per Sector | `/emissions-trend-by-sector` | Multi-line | `data.years[]` | `data.series[].values[]` |
-| Emissions by Gas Type per Sector | `/emissions-by-gas-sector` | Stacked bar | `data.data[].sectorName` | `data.data[].total`, stack by `gasTypeName` |
-| Trend of Emissions by GHG Type | `/emissions-trend-by-gas` | Multi-line | `data.years[]` | `data.series[].values[]` |
-| Energy: Emissions per Contributor | `/sectors/energy/contributors` | Lollipop/bar | `data.data[].name` | `data.data[].total` |
-| Energy: Contributor Emission Trends | `/sectors/energy/trends` | Line | `data.years[]` | `data.series[].values[]` |
-| Industrial Process: Emissions per Contributor | `/sectors/industrial-process/contributors` | Bar | `data.data[].name` | `data.data[].total` |
-| Industrial Process: Emission Trends | `/sectors/industrial-process/trends` | Multi-line | `data.years[]` | `data.series[].values[]` |
-| Mining: Emissions per Contributor | `/sectors/mining/contributors` | Donut | `data.data[].name` | `data.data[].total` |
-| Mining: Contributor Emission Trends | `/sectors/mining/trends` | Line | `data.years[]` | `data.series[].values[]` |
-| Agriculture: Emissions per Contributor | `/sectors/agriculture/contributors` | Horizontal bar | `data.data[].name` | `data.data[].total` |
-| Agriculture: Contributor Emission Trends | `/sectors/agriculture/trends` | Area/line | `data.years[]` | `data.series[].values[]` |
-| Livestock: Emissions per Contributor | `/sectors/livestock/contributors` | Horizontal bar | `data.data[].name` | `data.data[].total` |
-| Livestock: Contributor Emission Trends | `/sectors/livestock/trends` | Stepped area | `data.years[]` | `data.series[].values[]` |
-| Human Settlement: Emissions per Contributor | `/sectors/human-settlement/contributors` | Lollipop | `data.data[].name` | `data.data[].total` |
-| Human Settlement: Contributor Trends | `/sectors/human-settlement/trends` | Area/line | `data.years[]` | `data.series[].values[]` |
-| Waste: Emissions by Subcategory | `/sectors/waste/subcategories` | Donut | `data.data[].name` | `data.data[].total` |
-| Waste: Subcategory Trends | `/sectors/waste/subcategories/trends` | Line | `data.years[]` | `data.series[].values[]` |
-| Waste: Emissions by Contributor | `/sectors/waste/contributors` | Lollipop | `data.data[].name` | `data.data[].total` |
-| Waste: Contributor Trends | `/sectors/waste/contributors/trends` | Line | `data.years[]` | `data.series[].values[]` |
-| Transport: Emissions by Mode | `/sectors/transport/modes` | Polar/category bar | `data.data[].name` | `data.data[].total` |
-| Transport: Mode Trends | `/sectors/transport/modes/trends` | Area | `data.years[]` | `data.series[].values[]` |
-| Transport: Emissions by Fuel | `/sectors/transport/fuels` | Horizontal bar | `data.data[].name` | `data.data[].total` |
-| Transport: Fuel Trends | `/sectors/transport/fuels/trends` | Multi-line | `data.years[]` | `data.series[].values[]` |
-| Land Use: Removals by Carbon Sink | `/sectors/land-use/removals-by-sink` | Horizontal bar | `data.data[].name` | `data.data[].total` |
-| Land Use: Carbon Sink Trends | `/sectors/land-use/removals-trend` | Area | `data.years[]` | `data.series[].values[]` |
-| Land Use: Regional Removal Heatmap | `/sectors/land-use/removals-by-region` | Heatmap | `regionName` / `carbonSinkName` | `data.data[].amountRemoved` |
+**Test with cURL:**
 
+```bash
+curl -X POST \
+  "$API_BASE_URL/climate-change/api/v1/climate-change/measure-action-field-data-request" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data @payload.json
+```
