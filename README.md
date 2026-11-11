@@ -513,6 +513,46 @@ Content-Type: application/json
 }
 ```
 
+### 5. Industry 
+
+```
+{
+  "category": "DIVERSIFICATION_OF_CLEAN_ENERGY_SOURCES",
+  "sectorMeasureCategoryUid": "11065608-41be-4f7b-85a9-3835cb2c0702",
+  "values": {
+    "coverage": "TANZANIA_MAINLAND",
+    "regionId": 1,
+    "councilId": 1,
+    "year": 2026,
+    "industryName": "Temeke Green Manufacturing Limited",
+    "installedCapacity": 1200,
+    "productionCapacity": 950,
+    "energySources": [
+      {
+        "source": "SOLAR_POWER",
+        "consumption": 450.5,
+        "unit": "MW",
+        "ownership": "PRIVATE",
+        "quantityReducedCO2": 180.5,
+        "quantityReducedCH4": 3.2,
+        "quantityReducedN2O": 0.8,
+        "quantityReducedHFCs": 0
+      },
+      {
+        "source": "NATURAL_GAS",
+        "consumption": 25.75,
+        "unit": "MMscfd",
+        "ownership": "PRIVATE",
+        "quantityReducedCO2": 95.4,
+        "quantityReducedCH4": 2.1,
+        "quantityReducedN2O": 0.4,
+        "quantityReducedHFCs": 0
+      }
+    ]
+  }
+}
+```
+
 **Test with cURL:**
 
 ```bash
