@@ -598,6 +598,16 @@ curl -X POST \
 | Livestock | Silvopasture | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
 | Livestock | Land Range Restoration | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
 
+### Industry — Diversification of Clean Energy Sources
+
+| JSON field | Accepted values |
+|---|---|
+| coverage | TANZANIA_MAINLAND, ZANZIBAR |
+| energySources[].source | HYDROPOWER, SOLAR_POWER, WIND, BIOENERGY, GEOTHERMAL, HYDROGEN_GAS, NATURAL_GAS, TIDAL_WAVES, NUCLEAR |
+| energySources[].unit | MW, MMscfd |
+| energySources[].ownership | GOVERNMENT, PRIVATE, INDIVIDUAL, COMMUNITY |
+
+
 ## Activities using the standard Ownership dropdown
 
 For these activities, use:
