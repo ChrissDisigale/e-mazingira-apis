@@ -562,3 +562,94 @@ curl -X POST \
   -H "Content-Type: application/json" \
   --data @payload.json
 ```
+
+
+## Common dropdowns
+
+| Activities | JSON field | Accepted values |
+|---|---|---|
+| All mitigation activities | coverage | TANZANIA_MAINLAND, ZANZIBAR |
+| Most facility/project activities | ownership | GOVERNMENT, PRIVATE, INDIVIDUAL |
+| Clean Power Technologies | technologies[].ownership | GOVERNMENT, PRIVATE, INDIVIDUAL, COMMUNITY |
+| Industry Diversification | energySources[].ownership | GOVERNMENT, PRIVATE, INDIVIDUAL, COMMUNITY |
+
+## Activity-specific dropdowns
+
+| Sector | Activity | JSON field | Accepted values |
+|---|---|---|---|
+| Energy | Clean Technologies for Power Generation | technologies[].technologyType | HYDROPOWER, GEOTHERMAL, SOLAR_POWER, WIND_POWER, BIOENERGY, HYDROGEN_GAS |
+| Transport | BRT | energySource | ELECTRICITY, GAS |
+| Transport | Locomotives | energySource | ELECTRICITY, GAS |
+| Transport | Private Vehicles | energySource | ELECTRICITY, GAS |
+| Transport | Railway | transportType | SGR, MGR |
+| Transport | Road Infrastructure | transportType | BRT, CYCLING, OTHER |
+| Forestry | CBFM | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Forestry | JFM | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Forestry | Planted Forests and Woodlots | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Forestry | Agroforest | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Forestry | Natural Regeneration | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Forestry | Mangroves Restoration | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Forestry | Agrosilvipastoral | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Waste | Alternative Charcoal Production | charcoalProductionMaterials | ORGANIC_WASTE, RICE_HUSK |
+| Industry | Diversification of Clean Energy Sources | energySources[].source | HYDROPOWER, SOLAR_POWER, WIND, BIOENERGY, GEOTHERMAL, HYDROGEN_GAS, NATURAL_GAS, TIDAL_WAVES, NUCLEAR |
+| Industry | Diversification of Clean Energy Sources | energySources[].unit | MW, MMscfd |
+| Livestock | Silviculture | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Livestock | Agro-silvopasture | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Livestock | Silvopasture | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+| Livestock | Land Range Restoration | managementType | VILLAGE_GOVERNMENT, COMMUNITY |
+
+## Activities using the standard Ownership dropdown
+
+For these activities, use:
+
+GOVERNMENT
+PRIVATE
+INDIVIDUAL
+
+| Sector | Activities |
+|---|---|
+| Energy | Clean Power Interconnection, Power Production, Cooking, Natural Gas Transportation, Micro-renewable Generation, Mini-grid Renewable Generation |
+| Transport | Railway, Road Infrastructure, BRT, Locomotives, Private Vehicles, Cycling, Pedestrian |
+| Waste | Recycling, Sorting, Landfill, Biogas, Alternative Charcoal Production |
+| Livestock | Improved Livestock Breeds, Improved Livestock Fodders |
+
+## Dynamic location dropdowns
+
+These do not use hardcoded names in the payload.
+
+| JSON field | Value to submit | Options source |
+|---|---|---|
+| regionId | Numeric Region ID, such as 1 | GET /env/api/v1/config/regions |
+| councilId | Numeric Council ID | GET /env/api/v1/config/regions/councils/{regionId} |
+
+Do not submit:
+
+{
+  "regionId": "Dodoma",
+  "councilId": "Dodoma City"
+}
+
+Submit their numeric IDs:
+
+{
+  "regionId": 1,
+  "councilId": 10
+}
+
+## Important similar values
+
+These fields have different accepted values:
+
+// Transport
+"energySource": "GAS"
+
+// Industry
+"source": "NATURAL_GAS"
+
+Also note:
+
+- Clean Technology uses WIND_POWER.
+- Industry Energy Source uses WIND.
+- Clean Technology fields belong inside technologies[].
+- Industry fields belong inside energySources[].
+- wasteType, livestock activityType, and several transport transportType fields are currently text fields, so the backend does not enforce a fixed dropdown list for them.
